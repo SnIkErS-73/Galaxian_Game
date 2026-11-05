@@ -78,6 +78,3 @@ Galaxian/
 - [SDL2](https://www.libsdl.org/) 2.30.8
 - [SDL2_ttf](https://github.com/libsdl-org/SDL_ttf) 2.20.2
 
-## Лицензия
-
-MIT, см. `LICENSE`.
