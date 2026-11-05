@@ -44,7 +44,7 @@
 
 1. Клонировать репозиторий:
    ```
-   git clone https://github.com/<ник>/Galaxian.git
+   git clone https://github.com/SnIkErS-73/Galaxian.git
    ```
 2. Открыть `Galaxian.slnx`.
 3. Выбрать конфигурацию `Debug` или `Release`, платформу `x64`.
