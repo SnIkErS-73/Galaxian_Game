@@ -19,6 +19,32 @@ typedef struct {
 #define COLOR_PURPLE  (Color){180, 0, 255, 255}
 #define COLOR_GRAY    (Color){128, 128, 128, 255}
 
+
+/* Индексы палитры. Нужны для группировки прямоугольников по цвету:
+ * все прямоугольники одного цвета рисуются одним вызовом API. */
+enum {
+    PAL_CYAN = 0,
+    PAL_BLACK,
+    PAL_WHITE,
+    PAL_RED,
+    PAL_GREEN,
+    PAL_BLUE,
+    PAL_YELLOW,
+    PAL_PURPLE,
+    PAL_GRAY,
+    PAL_WING,
+    PAL_COUNT
+};
+
+/* Максимум прямоугольников одного цвета за кадр */
+#define BATCH_MAX 4096
+
+void batch_begin(void);                               /* очистить буферы */
+void batch_add(int pal, int x, int y, int w, int h); /* добавить прямоугольник */
+void batch_flush(void);                              /* отрисовать все буферы */
+
+
+
 extern SDL_Renderer* renderer;
 
 void init_font(void);

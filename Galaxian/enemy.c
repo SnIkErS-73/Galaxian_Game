@@ -23,8 +23,8 @@ void init_enemies(void) {
         cols = 5;
         break;
     case DIFFICULTY_HARD:
-        rows = 4;
-        cols = 8;
+        rows = 8;
+        cols = 16;
         break;
     default:
         rows = 4;
@@ -38,6 +38,7 @@ void init_enemies(void) {
 
     Color colors[] = { COLOR_RED, COLOR_GREEN, COLOR_BLUE, COLOR_YELLOW, COLOR_PURPLE };
     int num_colors = sizeof(colors) / sizeof(Color);
+    const int palette_idx[] = { PAL_RED, PAL_GREEN, PAL_BLUE, PAL_YELLOW, PAL_PURPLE };
 
     for (int row = 0; row < rows && count < MAX_ENEMIES; row++) {
         for (int col = 0; col < cols && count < MAX_ENEMIES; col++) {
@@ -49,6 +50,7 @@ void init_enemies(void) {
             enemies[count].diving = false;
             enemies[count].dive_step = 0;
             enemies[count].color = colors[count % num_colors];
+            enemies[count].palette_idx = palette_idx[count % num_colors];
             count++;
         }
     }
@@ -169,10 +171,13 @@ void draw_enemy(Enemy* e) {
     int cx = e->x + e->width / 2;
     int cy = e->y + e->height / 2;
 
-    draw_rect(cx - 15, cy - 10, 30, 20, e->color);
-    draw_rect(cx - 10, cy - 20, 20, 10, e->color);
-    draw_rect(cx - 18, cy - 22, 4, 8, COLOR_WHITE);
-    draw_rect(cx + 14, cy - 22, 4, 8, COLOR_WHITE);
+    /* Раньше здесь было 4 вызова draw_rect, то есть 4 вызова
+     * SDL_SetRenderDrawColor + 4 вызова SDL_RenderFillRect.
+     * Теперь прямоугольники просто складываются в буфер по цвету. */
+    batch_add(e->palette_idx, cx - 15, cy - 10, 30, 20);
+    batch_add(e->palette_idx, cx - 10, cy - 20, 20, 10);
+    batch_add(PAL_WHITE, cx - 18, cy - 22, 4, 8);
+    batch_add(PAL_WHITE, cx + 14, cy - 22, 4, 8);
 }
 
 bool check_victory(void) {

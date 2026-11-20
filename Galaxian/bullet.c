@@ -32,6 +32,6 @@ void update_bullets(void) {
 void draw_bullet(Bullet* b) {
     if (!b->active) return;
 
-    Color c = b->is_enemy ? COLOR_RED : COLOR_YELLOW;
-    draw_rect(b->x, b->y, b->width, b->height, c);
+    batch_add(b->is_enemy ? PAL_RED : PAL_YELLOW,
+        b->x, b->y, b->width, b->height);
 }

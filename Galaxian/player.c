@@ -15,11 +15,8 @@ void init_player(void) {
 void draw_player(void) {
     if (!player.alive) return;
 
-    Color body = COLOR_GREEN;
-    Color wing = { 0, 200, 0, 255 };
-
-    draw_rect(player.x + 10, player.y, 30, 25, body);
-    draw_rect(player.x, player.y + 15, 10, 10, wing);
-    draw_rect(player.x + 40, player.y + 15, 10, 10, wing);
-    draw_rect(player.x + 23, player.y - 8, 14, 10, body);
+    batch_add(PAL_GREEN, player.x + 10, player.y, 30, 25);
+    batch_add(PAL_WING, player.x, player.y + 15, 10, 10);
+    batch_add(PAL_WING, player.x + 40, player.y + 15, 10, 10);
+    batch_add(PAL_GREEN, player.x + 23, player.y - 8, 14, 10);
 }

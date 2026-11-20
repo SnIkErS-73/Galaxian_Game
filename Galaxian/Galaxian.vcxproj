@@ -145,7 +145,7 @@
       <LanguageStandard>Default</LanguageStandard>
       <AdditionalIncludeDirectories>$(SolutionDir)libs</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <Optimization>Disabled</Optimization>
+      <Optimization>MaxSpeed</Optimization>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>

@@ -42,6 +42,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         if (current_state == MENU_MAIN) {
             handle_menu_input();
 
+            {
+                const Uint8* st = SDL_GetKeyboardState(NULL);
+                static int bench_cd = 0;
+                if (bench_cd > 0) bench_cd--;
+                if (st[SDL_SCANCODE_B] && bench_cd <= 0) {
+                    bench_cd = 120;
+                    run_benchmark(600);
+                }
+            }
+
+
             if (menu.leaderboard_shown) {
                 draw_leaderboard();
             }

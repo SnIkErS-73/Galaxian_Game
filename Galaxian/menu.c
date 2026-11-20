@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <SDL.h>
+#include "player.h"
+#include "enemy.h"
+#include "bullet.h"
 
 GameState current_state = MENU_MAIN;
 Menu menu;

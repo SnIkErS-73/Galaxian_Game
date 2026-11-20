@@ -44,7 +44,7 @@
 
 1. Клонировать репозиторий:
    ```
-   git clone https://github.com/SnIkErS-73/Galaxian_Game.git
+   git clone https://github.com/SnIkErS-73/Galaxian.git
    ```
 2. Открыть `Galaxian.slnx`.
 3. Выбрать конфигурацию `Debug` или `Release`, платформу `x64`.
@@ -78,3 +78,6 @@ Galaxian/
 - [SDL2](https://www.libsdl.org/) 2.30.8
 - [SDL2_ttf](https://github.com/libsdl-org/SDL_ttf) 2.20.2
 
+## Лицензия
+
+MIT, см. `LICENSE`.

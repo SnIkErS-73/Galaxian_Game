@@ -12,6 +12,10 @@
 #include <stdlib.h>
 #include <time.h>
 
+
+/* Разбивка времени отрисовки по фазам - для поиска настоящего узкого места */
+static double t_clear = 0, t_stars = 0, t_fill = 0, t_present = 0;
+
 int score = 0;
 bool game_over = false;
 bool game_won = false;
@@ -129,6 +133,187 @@ void check_collisions() {
     }
 }
 
+
+
+/* Текущее время в микросекундах (точнее, чем SDL_GetTicks) */
+static double bench_us(void) {
+    static Uint64 freq = 0;
+    static Uint64 c = 0;
+
+    /* В SDL2 2.0.18+ обе функции возвращают значение
+     * и не принимают аргументов. */
+    if (freq == 0) {
+        freq = SDL_GetPerformanceFrequency();
+        if (freq == 0) return 0.0;
+    }
+
+    c = SDL_GetPerformanceCounter();
+    return (double)c * 1000000.0 / (double)freq;
+}
+
+
+/* Единая функция отрисовки игрового кадра.
+ * Используется и в обычной игре, и в бенчмарке — поэтому бенчарк
+ * всегда меряет ровно тот же код, что и игра. */
+static void draw_game_frame(void) {
+    double a = bench_us();
+
+    SDL_SetRenderDrawColor(renderer, 10, 10, 30, 255);
+    SDL_RenderClear(renderer);
+
+    double b = bench_us();
+    draw_stars();
+    double c = bench_us();
+
+    batch_begin();
+    for (int i = 0; i < MAX_BULLETS; i++) {
+        draw_bullet(&bullets[i]);
+    }
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        draw_enemy(&enemies[i]);
+    }
+    draw_player();
+    batch_flush();
+
+    double d = bench_us();
+    SDL_RenderPresent(renderer);
+    double e = bench_us();
+
+    t_clear += (b - a);
+    t_stars += (c - b);
+    t_fill += (d - c);
+    t_present += (e - d);
+}
+
+
+
+/* =====================================================================
+ * РЕЖИМ БЕНЧМАРКА
+ *
+ * Запускается клавишей B в главном меню.
+ *
+ * Ключевое свойство: каждый кадр выполняет РОВНО ОДИНАКОВУЮ нагрузку
+ *   - одинаковое число живых врагов (убитые восстанавливаются),
+ *   - одинаковое число пуль в полёте,
+ *   - фиксированный seed rand() -> одинаковая последовательность.
+ * Поэтому результат воспроизводим от запуска к запуску, и результаты
+ * "до" и "после" можно сравнивать напрямую.
+ *
+ * Отдельно меряется время обновления и время отрисовки - это и есть
+ * два разных узких места.
+ * ===================================================================== */
+
+#define BENCH_TARGET_BULLETS 32
+
+
+
+void run_benchmark(int frames) {
+    /* Фиксированный seed: одинаковая последовательность rand()
+     * в каждом запуске -> одинаковая работа. */
+    srand(12345);
+
+    Difficulty saved_difficulty = selected_difficulty;
+    selected_difficulty = DIFFICULTY_HARD;
+
+    init_player();
+    init_enemies();
+    init_bullets();
+
+    /* Исходные позиции врагов - нужны, чтобы восстанавливать убитых.
+     * Враги создаются подряд с нуля, поэтому реальных первые spawned. */
+    static int orig_x[MAX_ENEMIES];
+    static int orig_y[MAX_ENEMIES];
+    int spawned = 0;
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        orig_x[i] = enemies[i].x;
+        orig_y[i] = enemies[i].y;
+        if (enemies[i].alive) spawned++;
+    }
+
+    double upd_total = 0.0;
+    double draw_total = 0.0;
+
+    t_clear = t_stars = t_fill = t_present = 0;
+
+    for (int f = 0; f < frames; f++) {
+        /* ---------------- ОБНОВЛЕНИЕ ---------------- */
+        double t0 = bench_us();
+
+        update_bullets();
+        update_enemies();
+        check_collisions();
+
+        /* Сбрасываем игровые флаги, чтобы сценарий не прерывался
+         * (враги не должны "дойти донизу" и завершить игру). */
+        game_over = false;
+        game_won = false;
+        player.alive = true;
+
+        /* Восстанавливаем убитых врагов -> постоянное число живых.
+         * Восстанавливаем ТОЛЬКО реально созданных (i < spawned),
+         * иначе "воскреснут" пустые слоты массива. */
+        for (int i = 0; i < spawned; i++) {
+            if (!enemies[i].alive) {
+                enemies[i].alive = true;
+                enemies[i].diving = false;
+                enemies[i].dive_step = 0;
+                enemies[i].x = orig_x[i];
+                enemies[i].y = orig_y[i];
+            }
+        }
+
+        /* Поддерживаем постоянное число пуль в полёте */
+        int active = 0;
+        for (int i = 0; i < MAX_BULLETS; i++) {
+            if (bullets[i].active) active++;
+        }
+        for (int i = 0; i < MAX_BULLETS && active < BENCH_TARGET_BULLETS; i++) {
+            if (!bullets[i].active) {
+                bullets[i].x = 120 + (i * 37) % 700;
+                bullets[i].y = 200 + (i * 53) % 300;
+                bullets[i].width = 4;
+                bullets[i].height = 15;
+                bullets[i].active = true;
+                bullets[i].is_enemy = (i & 1);
+                active++;
+            }
+        }
+
+        double t1 = bench_us();
+
+        /* ---------------- ОТРИСОВКА ---------------- */
+        draw_game_frame();
+
+        double t2 = bench_us();
+
+        upd_total += (t1 - t0);
+        draw_total += (t2 - t1);
+    }
+
+    selected_difficulty = saved_difficulty;
+
+    FILE* f = fopen("C:/Users/OlegL/Desktop/Galaxian_github/bench_log.txt", "a");
+    if (f) {
+        fprintf(f, "enemies=%d bullets=%d frames=%d update_ms=%.4f draw_ms=%.4f total_ms=%.4f\n",
+            spawned, BENCH_TARGET_BULLETS, frames,
+            upd_total / frames / 1000.0,
+            draw_total / frames / 1000.0,
+            (upd_total + draw_total) / frames / 1000.0);
+        fclose(f);
+    }
+
+    FILE* f2 = fopen("C:/Users/OlegL/Desktop/Galaxian_github/bench_log.txt", "a");
+    if (f2) {
+        fprintf(f2, "  clear=%.4f stars=%.4f fill=%.4f present=%.4f (ms)\n",
+            t_clear / frames / 1000.0, t_stars / frames / 1000.0,
+            t_fill / frames / 1000.0, t_present / frames / 1000.0);
+        fclose(f2);
+    }
+}
+
+
+
+
 // Основной игровой цикл
 void game_loop() {
     SDL_Event event;
@@ -148,6 +333,18 @@ void game_loop() {
     if (current_state == GAME_MODE_AI_VS_AI) {
         return;
     }
+
+
+
+    /* === ИЗМЕРИТЕЛЬ ВРЕМЕНИ КАДРА (для бенчмарка) ===
+     * Считаем среднее время одного кадра в миллисекундах.
+     * frame_time — это чистое время работы кадра БЕЗ ожидания SDL_Delay,
+     * то есть без влияния VSync и частоты обновления монитора.
+     * Результат дописывается в файл bench_log.txt, каждую секунду.
+     */
+    static double bench_sum = 0;
+    static int    bench_count = 0;
+
     while (!game_over && !return_to_menu) {
         frame_start = SDL_GetTicks();
 
@@ -171,22 +368,28 @@ void game_loop() {
         }
 
         // Отрисовка
-        SDL_SetRenderDrawColor(renderer, 10, 10, 30, 255);
-        SDL_RenderClear(renderer);
-
-        draw_stars();
-
-        for (int i = 0; i < MAX_BULLETS; i++) {
-            draw_bullet(&bullets[i]);
-        }
-        for (int i = 0; i < MAX_ENEMIES; i++) {
-            draw_enemy(&enemies[i]);
-        }
-        draw_player();
-
-        SDL_RenderPresent(renderer);
+        draw_game_frame();
 
         frame_time = SDL_GetTicks() - frame_start;
+
+        /* === ИЗМЕРИТЕЛЬ ВРЕМЕНИ КАДРА (для бенчмарка) ===
+         * Считаем среднее время одного кадра в миллисекундах.
+         * frame_time — чистое время работы кадра БЕЗ ожидания SDL_Delay,
+         * то есть без влияния VSync и частоты обновления монитора.
+         * Результат дописывается в bench_log.txt раз в секунду.
+         */
+        bench_sum += frame_time;
+        bench_count++;
+        if (bench_count >= 60) {
+            FILE* f = fopen("bench_log.txt", "a");
+            if (f) {
+                fprintf(f, "avg_frame_ms=%.4f\n", bench_sum / bench_count);
+                fclose(f);
+            }
+            bench_sum = 0;
+            bench_count = 0;
+        }
+
         if (FRAME_DELAY > frame_time) {
             SDL_Delay(FRAME_DELAY - frame_time);
         }

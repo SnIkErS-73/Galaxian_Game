@@ -1,0 +1,26 @@
+﻿# Сборка Visual Studio
+x64/
+Debug/
+Release/
+.vs/
+*.user
+*.suo
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.idb
+*.ipch
+*.tlog
+*.lastbuildstate
+
+# Сборка через Makefile
+*.o
+galaxian
+benchmark
+
+# Сырые логи замеров
+bench_log.txt
+
+# Данные игры
+leaderboard.dat

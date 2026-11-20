@@ -13,6 +13,7 @@ typedef struct {
     int dive_target_x;
     int dive_step;
     Color color;
+    int palette_idx;
 } Enemy;
 
 extern Enemy enemies[MAX_ENEMIES];
