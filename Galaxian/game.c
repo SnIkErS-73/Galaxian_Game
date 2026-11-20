@@ -16,6 +16,12 @@
 /* Разбивка времени отрисовки по фазам - для поиска настоящего узкого места */
 static double t_clear = 0, t_stars = 0, t_fill = 0, t_present = 0;
 
+
+/* 0 - новая отрисовка (батчинг), 1 - старая (как в исходной курсовой).
+ * Нужна, чтобы в одном прогоне сравнить оба варианта на одних данных. */
+static int bench_old_draw = 0;
+
+
 int score = 0;
 bool game_over = false;
 bool game_won = false;
@@ -152,6 +158,43 @@ static double bench_us(void) {
 }
 
 
+
+
+/* ---------------------------------------------------------------------
+ * СТАРАЯ отрисовка - копия исходного кода курсовой.
+ * Используется только в бенчмарке как точка отсчёта.
+ * --------------------------------------------------------------------- */
+static void draw_enemy_old(Enemy* e) {
+    if (!e->alive) return;
+
+    int cx = e->x + e->width / 2;
+    int cy = e->y + e->height / 2;
+
+    draw_rect(cx - 15, cy - 10, 30, 20, e->color);
+    draw_rect(cx - 10, cy - 20, 20, 10, e->color);
+    draw_rect(cx - 18, cy - 22, 4, 8, COLOR_WHITE);
+    draw_rect(cx + 14, cy - 22, 4, 8, COLOR_WHITE);
+}
+
+static void draw_bullet_old(Bullet* b) {
+    if (!b->active) return;
+    draw_rect(b->x, b->y, b->width, b->height, b->is_enemy ? COLOR_RED : COLOR_YELLOW);
+}
+
+static void draw_player_old(void) {
+    if (!player.alive) return;
+
+    Color body = COLOR_GREEN;
+    Color wing = { 0, 200, 0, 255 };
+
+    draw_rect(player.x + 10, player.y, 30, 25, body);
+    draw_rect(player.x, player.y + 15, 10, 10, wing);
+    draw_rect(player.x + 40, player.y + 15, 10, 10, wing);
+    draw_rect(player.x + 23, player.y - 8, 14, 10, body);
+}
+
+
+
 /* Единая функция отрисовки игрового кадра.
  * Используется и в обычной игре, и в бенчмарке — поэтому бенчарк
  * всегда меряет ровно тот же код, что и игра. */
@@ -165,15 +208,28 @@ static void draw_game_frame(void) {
     draw_stars();
     double c = bench_us();
 
-    batch_begin();
-    for (int i = 0; i < MAX_BULLETS; i++) {
-        draw_bullet(&bullets[i]);
+    if (bench_old_draw) {
+        /* СТАРАЯ отрисовка - как в исходной версии курсовой */
+        for (int i = 0; i < MAX_BULLETS; i++) {
+            draw_bullet_old(&bullets[i]);
+        }
+        for (int i = 0; i < MAX_ENEMIES; i++) {
+            draw_enemy_old(&enemies[i]);
+        }
+        draw_player_old();
     }
-    for (int i = 0; i < MAX_ENEMIES; i++) {
-        draw_enemy(&enemies[i]);
+    else {
+        /* НОВАЯ отрисовка - батчинг по цветам */
+        batch_begin();
+        for (int i = 0; i < MAX_BULLETS; i++) {
+            draw_bullet(&bullets[i]);
+        }
+        for (int i = 0; i < MAX_ENEMIES; i++) {
+            draw_enemy(&enemies[i]);
+        }
+        draw_player();
+        batch_flush();
     }
-    draw_player();
-    batch_flush();
 
     double d = bench_us();
     SDL_RenderPresent(renderer);
@@ -207,32 +263,43 @@ static void draw_game_frame(void) {
 
 
 
-void run_benchmark(int frames) {
-    /* Фиксированный seed: одинаковая последовательность rand()
-     * в каждом запуске -> одинаковая работа. */
+ /* ---------------------------------------------------------------------
+  * ПОДГОТОВКА СЦЕНАРИЯ
+  * Сбрасывает состояние игры в одинаковое начальное положение, чтобы
+  * оба прогона (старая и новая отрисовка) выполняли РОВНО одинаковую
+  * работу и сравнение было честным.
+  * --------------------------------------------------------------------- */
+static int bench_orig_x[MAX_ENEMIES];
+static int bench_orig_y[MAX_ENEMIES];
+static int bench_spawned = 0;
+
+static void bench_setup(void) {
+    /* Одинаковая последовательность rand() в каждом прогоне */
     srand(12345);
 
-    Difficulty saved_difficulty = selected_difficulty;
     selected_difficulty = DIFFICULTY_HARD;
 
     init_player();
     init_enemies();
     init_bullets();
 
-    /* Исходные позиции врагов - нужны, чтобы восстанавливать убитых.
-     * Враги создаются подряд с нуля, поэтому реальных первые spawned. */
-    static int orig_x[MAX_ENEMIES];
-    static int orig_y[MAX_ENEMIES];
-    int spawned = 0;
+    bench_spawned = 0;
     for (int i = 0; i < MAX_ENEMIES; i++) {
-        orig_x[i] = enemies[i].x;
-        orig_y[i] = enemies[i].y;
-        if (enemies[i].alive) spawned++;
+        bench_orig_x[i] = enemies[i].x;
+        bench_orig_y[i] = enemies[i].y;
+        if (enemies[i].alive) bench_spawned++;
     }
+}
 
-    double upd_total = 0.0;
-    double draw_total = 0.0;
-
+/* ---------------------------------------------------------------------
+ * ОДИН ПРОГОН: frames кадров.
+ *   update_ms  - обновление логики
+ *   fill_ms    - отрисовка объектов (без ожидания vsync)
+ *   present_ms - SDL_RenderPresent (ожидание вертикальной синхронизации)
+ * --------------------------------------------------------------------- */
+static void bench_run_frames(int frames, double* update_ms,
+    double* fill_ms, double* present_ms) {
+    double upd = 0.0;
     t_clear = t_stars = t_fill = t_present = 0;
 
     for (int f = 0; f < frames; f++) {
@@ -243,22 +310,20 @@ void run_benchmark(int frames) {
         update_enemies();
         check_collisions();
 
-        /* Сбрасываем игровые флаги, чтобы сценарий не прерывался
-         * (враги не должны "дойти донизу" и завершить игру). */
+        /* Сбрасываем игровые флаги, чтобы сценарий не прерывался */
         game_over = false;
         game_won = false;
         player.alive = true;
 
         /* Восстанавливаем убитых врагов -> постоянное число живых.
-         * Восстанавливаем ТОЛЬКО реально созданных (i < spawned),
-         * иначе "воскреснут" пустые слоты массива. */
-        for (int i = 0; i < spawned; i++) {
+         * ТОЛЬКО реально созданных, иначе "воскреснут" пустые слоты. */
+        for (int i = 0; i < bench_spawned; i++) {
             if (!enemies[i].alive) {
                 enemies[i].alive = true;
                 enemies[i].diving = false;
                 enemies[i].dive_step = 0;
-                enemies[i].x = orig_x[i];
-                enemies[i].y = orig_y[i];
+                enemies[i].x = bench_orig_x[i];
+                enemies[i].y = bench_orig_y[i];
             }
         }
 
@@ -284,33 +349,45 @@ void run_benchmark(int frames) {
         /* ---------------- ОТРИСОВКА ---------------- */
         draw_game_frame();
 
-        double t2 = bench_us();
-
-        upd_total += (t1 - t0);
-        draw_total += (t2 - t1);
+        upd += (t1 - t0);
     }
 
+    *update_ms = upd / frames / 1000.0;
+    *fill_ms = t_fill / frames / 1000.0;
+    *present_ms = t_present / frames / 1000.0;
+}
+
+void run_benchmark(int frames) {
+    Difficulty saved_difficulty = selected_difficulty;
+
+    double old_upd, old_fill, old_present;
+    double new_upd, new_fill, new_present;
+
+    /* ---- ПРОГОН 1: старая отрисовка (точка отсчёта) ---- */
+    bench_setup();
+    bench_old_draw = 1;
+    bench_run_frames(frames, &old_upd, &old_fill, &old_present);
+
+    /* ---- ПРОГОН 2: новая отрисовка (батчинг) ---- */
+    bench_setup();
+    bench_old_draw = 0;
+    bench_run_frames(frames, &new_upd, &new_fill, &new_present);
+
+    bench_old_draw = 0;
     selected_difficulty = saved_difficulty;
 
     FILE* f = fopen("C:/Users/OlegL/Desktop/Galaxian_github/bench_log.txt", "a");
     if (f) {
-        fprintf(f, "enemies=%d bullets=%d frames=%d update_ms=%.4f draw_ms=%.4f total_ms=%.4f\n",
-            spawned, BENCH_TARGET_BULLETS, frames,
-            upd_total / frames / 1000.0,
-            draw_total / frames / 1000.0,
-            (upd_total + draw_total) / frames / 1000.0);
+        fprintf(f, "enemies=%d bullets=%d frames=%d\n",
+            bench_spawned, BENCH_TARGET_BULLETS, frames);
+        fprintf(f, "  OLD draw: update=%.4f fill=%.4f work=%.4f present=%.4f ms\n",
+            old_upd, old_fill, old_upd + old_fill, old_present);
+        fprintf(f, "  NEW draw: update=%.4f fill=%.4f work=%.4f present=%.4f ms  fill_speedup=%.2fx\n",
+            new_upd, new_fill, new_upd + new_fill, new_present,
+            (new_fill > 0.0) ? (old_fill / new_fill) : 0.0);
         fclose(f);
     }
-
-    FILE* f2 = fopen("C:/Users/OlegL/Desktop/Galaxian_github/bench_log.txt", "a");
-    if (f2) {
-        fprintf(f2, "  clear=%.4f stars=%.4f fill=%.4f present=%.4f (ms)\n",
-            t_clear / frames / 1000.0, t_stars / frames / 1000.0,
-            t_fill / frames / 1000.0, t_present / frames / 1000.0);
-        fclose(f2);
-    }
 }
-
 
 
 
