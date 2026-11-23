@@ -160,24 +160,28 @@ static void build_bands(void) {
 
 
 // Проверка столкновений
+// Проверка столкновений
 void check_collisions() {
     if (g_use_bands) build_bands();
 
-    // Снаряды игрока vs враги
+    /* Loop fusion: один проход по массиву пуль вместо двух.*/
     for (int b = 0; b < MAX_BULLETS; b++) {
-        if (bullets[b].active && !bullets[b].is_enemy) {
+        if (!bullets[b].active) continue;
 
+        if (!bullets[b].is_enemy) {
+            /* --- Снаряд игрока vs враги --- */
             if (g_use_bands) {
-                /* --- BROAD-PHASE: только соседние полосы --- */
+                /* BROAD-PHASE: только соседние полосы */
                 int band = bullets[b].y / BAND_H;
                 if (band < 0) band = 0;
                 if (band >= NUM_BANDS) band = NUM_BANDS - 1;
 
-                for (int bb = band - 1; bb <= band + 1; bb++) {
+                int hit = 0;
+                for (int bb = band - 1; bb <= band + 1 && !hit; bb++) {
                     if (bb < 0 || bb >= NUM_BANDS) continue;
 
                     int from = band_start[bb];
-                    int to   = band_start[bb + 1];
+                    int to = band_start[bb + 1];
 
                     for (int k = from; k < to; k++) {
                         int e = band_list[k];
@@ -190,13 +194,14 @@ void check_collisions() {
                             enemies[e].alive = false;
                             bullets[b].active = false;
                             score += 100 * get_score_multiplier();
+                            hit = 1;
                             break;
                         }
                     }
                 }
             }
             else {
-                /* --- ИСХОДНЫЙ АЛГОРИТМ: полный перебор всех врагов --- */
+                /* ИСХОДНЫЙ АЛГОРИТМ: полный перебор всех врагов */
                 for (int e = 0; e < MAX_ENEMIES; e++) {
                     if (!enemies[e].alive) continue;
 
@@ -212,11 +217,8 @@ void check_collisions() {
                 }
             }
         }
-    }
-
-    // Снаряды врагов vs игрок
-    for (int b = 0; b < MAX_BULLETS; b++) {
-        if (bullets[b].active && bullets[b].is_enemy) {
+        else {
+            /* --- Снаряд врага vs игрок --- */
             if (bullets[b].x < player.x + player.width &&
                 bullets[b].x + bullets[b].width > player.x &&
                 bullets[b].y < player.y + player.height &&
@@ -481,13 +483,14 @@ static void bench_run_frames(int frames, double* update_ms,
             }
         }
 
-        /* Поддерживаем постоянное число пуль в полёте */
+        /* Поддерживаем постоянное число пуль в полёте.
+         * Loop fusion: один проход вместо двух (подсчёт + дозаполнение). */
         int active = 0;
         for (int i = 0; i < MAX_BULLETS; i++) {
-            if (bullets[i].active) active++;
-        }
-        for (int i = 0; i < MAX_BULLETS && active < BENCH_TARGET_BULLETS; i++) {
-            if (!bullets[i].active) {
+            if (bullets[i].active) {
+                active++;
+            }
+            else if (active < BENCH_TARGET_BULLETS) {
                 bullets[i].x = 120 + (i * 37) % 700;
                 bullets[i].y = 200 + (i * 53) % 300;
                 bullets[i].width = 4;
