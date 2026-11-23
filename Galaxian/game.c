@@ -24,6 +24,10 @@ static double t_coll_new = 0;
  * Нужна, чтобы в одном прогоне сравнить оба варианта на одних данных. */
 static int bench_old_draw = 0;
 
+/* Флаг broad-phase.
+ * 0 - полный перебор всех врагов (исходный алгоритм)
+ * 1 - broad-phase по горизонтальным полосам (оптимизированный) */
+static int g_use_bands = 1;
 
 int score = 0;
 bool game_over = false;
@@ -157,27 +161,43 @@ static void build_bands(void) {
 
 // Проверка столкновений
 void check_collisions() {
-    /* Строим распределение врагов по полосам один раз на кадр */
-    build_bands();
+    if (g_use_bands) build_bands();
 
     // Снаряды игрока vs враги
     for (int b = 0; b < MAX_BULLETS; b++) {
         if (bullets[b].active && !bullets[b].is_enemy) {
 
-            /* Полоса, в которой находится пуля. */
-            int band = bullets[b].y / BAND_H;
-            if (band < 0) band = 0;
-            if (band >= NUM_BANDS) band = NUM_BANDS - 1;
+            if (g_use_bands) {
+                /* --- BROAD-PHASE: только соседние полосы --- */
+                int band = bullets[b].y / BAND_H;
+                if (band < 0) band = 0;
+                if (band >= NUM_BANDS) band = NUM_BANDS - 1;
 
-            /* Проверяем ТОЛЬКО соседние полосы (band-1, band, band+1).*/
-            for (int bb = band - 1; bb <= band + 1; bb++) {
-                if (bb < 0 || bb >= NUM_BANDS) continue;
+                for (int bb = band - 1; bb <= band + 1; bb++) {
+                    if (bb < 0 || bb >= NUM_BANDS) continue;
 
-                int from = band_start[bb];
-                int to = band_start[bb + 1];
+                    int from = band_start[bb];
+                    int to   = band_start[bb + 1];
 
-                for (int k = from; k < to; k++) {
-                    int e = band_list[k];
+                    for (int k = from; k < to; k++) {
+                        int e = band_list[k];
+                        if (!enemies[e].alive) continue;
+
+                        if (bullets[b].x < enemies[e].x + enemies[e].width &&
+                            bullets[b].x + bullets[b].width > enemies[e].x &&
+                            bullets[b].y < enemies[e].y + enemies[e].height &&
+                            bullets[b].y + bullets[b].height > enemies[e].y) {
+                            enemies[e].alive = false;
+                            bullets[b].active = false;
+                            score += 100 * get_score_multiplier();
+                            break;
+                        }
+                    }
+                }
+            }
+            else {
+                /* --- ИСХОДНЫЙ АЛГОРИТМ: полный перебор всех врагов --- */
+                for (int e = 0; e < MAX_ENEMIES; e++) {
                     if (!enemies[e].alive) continue;
 
                     if (bullets[b].x < enemies[e].x + enemies[e].width &&
@@ -208,6 +228,65 @@ void check_collisions() {
         }
     }
 }
+
+
+
+void check_collisions_ai(void) {
+    if (g_use_bands) build_bands();
+
+    // Только пули игрока уничтожают врагов (без начисления очков)
+    for (int b = 0; b < MAX_BULLETS; b++) {
+        if (bullets[b].active && !bullets[b].is_enemy) {
+
+            if (g_use_bands) {
+                /* --- BROAD-PHASE: только соседние полосы --- */
+                int band = bullets[b].y / BAND_H;
+                if (band < 0) band = 0;
+                if (band >= NUM_BANDS) band = NUM_BANDS - 1;
+
+                int hit = 0;
+                for (int bb = band - 1; bb <= band + 1 && !hit; bb++) {
+                    if (bb < 0 || bb >= NUM_BANDS) continue;
+
+                    int from = band_start[bb];
+                    int to = band_start[bb + 1];
+
+                    for (int k = from; k < to; k++) {
+                        int e = band_list[k];
+                        if (!enemies[e].alive) continue;
+
+                        if (bullets[b].x < enemies[e].x + enemies[e].width &&
+                            bullets[b].x + bullets[b].width > enemies[e].x &&
+                            bullets[b].y < enemies[e].y + enemies[e].height &&
+                            bullets[b].y + bullets[b].height > enemies[e].y) {
+                            enemies[e].alive = false;
+                            bullets[b].active = false;
+                            hit = 1;
+                            break;
+                        }
+                    }
+                }
+            }
+            else {
+                /* --- ИСХОДНЫЙ АЛГОРИТМ: полный перебор всех врагов --- */
+                for (int e = 0; e < MAX_ENEMIES; e++) {
+                    if (!enemies[e].alive) continue;
+
+                    if (bullets[b].x < enemies[e].x + enemies[e].width &&
+                        bullets[b].x + bullets[b].width > enemies[e].x &&
+                        bullets[b].y < enemies[e].y + enemies[e].height &&
+                        bullets[b].y + bullets[b].height > enemies[e].y) {
+                        enemies[e].alive = false;
+                        bullets[b].active = false;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    // Игрок неуязвим - проверку попадания в игрока НЕ делаем
+}
+
 
 
 
@@ -435,31 +514,59 @@ static void bench_run_frames(int frames, double* update_ms,
 void run_benchmark(int frames) {
     Difficulty saved_difficulty = selected_difficulty;
 
-    double old_upd, old_fill, old_present;
-    double new_upd, new_fill, new_present;
+    double upd_a, fill_a, pres_a;
+    double upd_b, fill_b, pres_b;
+    double upd_c, fill_c, pres_c;
+    double upd_d, fill_d, pres_d;
+    double coll_a, coll_b, coll_c, coll_d;
 
-    /* ---- ПРОГОН 1: старая отрисовка ---- */
+    /* ---- 1: старая отрисовка, исходный алгоритм столкновений ---- */
+    bench_setup();
     bench_old_draw = 1;
-    bench_run_frames(frames, &old_upd, &old_fill, &old_present);
-    t_coll_old = t_coll;
+    g_use_bands = 0;
+    bench_run_frames(frames, &upd_a, &fill_a, &pres_a);
+    coll_a = t_coll / frames / 1000.0;
 
-    /* ---- ПРОГОН 2: новая отрисовка (батчинг) ---- */
+    /* ---- 2: старая отрисовка, broad-phase ---- */
+    bench_setup();
+    bench_old_draw = 1;
+    g_use_bands = 1;
+    bench_run_frames(frames, &upd_b, &fill_b, &pres_b);
+    coll_b = t_coll / frames / 1000.0;
+
+    /* ---- 3: батчинг, исходный алгоритм столкновений ---- */
+    bench_setup();
     bench_old_draw = 0;
-    bench_run_frames(frames, &new_upd, &new_fill, &new_present);
-    t_coll_new = t_coll;
+    g_use_bands = 0;
+    bench_run_frames(frames, &upd_c, &fill_c, &pres_c);
+    coll_c = t_coll / frames / 1000.0;
+
+    /* ---- 4: батчинг, broad-phase ---- */
+    bench_setup();
+    bench_old_draw = 0;
+    g_use_bands = 1;
+    bench_run_frames(frames, &upd_d, &fill_d, &pres_d);
+    coll_d = t_coll / frames / 1000.0;
 
     bench_old_draw = 0;
+    g_use_bands = 1;
     selected_difficulty = saved_difficulty;
 
     FILE* f = fopen("C:/Users/OlegL/Desktop/Galaxian_github/bench_log.txt", "a");
     if (f) {
         fprintf(f, "enemies=%d bullets=%d frames=%d\n",
             bench_spawned, BENCH_TARGET_BULLETS, frames);
-        fprintf(f, "  OLD draw: update=%.4f coll=%.4f fill=%.4f work=%.4f present=%.4f ms\n",
-            old_upd, t_coll_old, old_fill, old_upd + old_fill, old_present);
-        fprintf(f, "  NEW draw: update=%.4f coll=%.4f fill=%.4f work=%.4f present=%.4f ms  fill_speedup=%.2fx\n",
-            new_upd, t_coll_new, new_fill, new_upd + new_fill, new_present,
-            (new_fill > 0.0) ? (old_fill / new_fill) : 0.0);
+        fprintf(f, "  OLD draw + no bands : update=%.4f coll=%.4f fill=%.4f work=%.4f ms\n",
+            upd_a, coll_a, fill_a, upd_a + fill_a);
+        fprintf(f, "  OLD draw + bands    : update=%.4f coll=%.4f fill=%.4f work=%.4f ms\n",
+            upd_b, coll_b, fill_b, upd_b + fill_b);
+        fprintf(f, "  NEW draw + no bands : update=%.4f coll=%.4f fill=%.4f work=%.4f ms\n",
+            upd_c, coll_c, fill_c, upd_c + fill_c);
+        fprintf(f, "  NEW draw + bands    : update=%.4f coll=%.4f fill=%.4f work=%.4f ms\n",
+            upd_d, coll_d, fill_d, upd_d + fill_d);
+        fprintf(f, "  speedup: batching=%.2fx  broadphase=%.2fx\n",
+            (fill_d > 0.0) ? (fill_a / fill_d) : 0.0,
+            (coll_d > 0.0) ? (coll_c / coll_d) : 0.0);
         fclose(f);
     }
 }
@@ -660,25 +767,4 @@ void game_loop() {
         SDL_RenderPresent(renderer);
         SDL_Delay(16);
     }
-}
-void check_collisions_ai(void) {
-    build_bands();
-    // Только пули игрока уничтожают врагов (без начисления очков)
-    for (int b = 0; b < MAX_BULLETS; b++) {
-        if (bullets[b].active && !bullets[b].is_enemy) {
-            for (int e = 0; e < MAX_ENEMIES; e++) {
-                if (enemies[e].alive) {
-                    if (bullets[b].x < enemies[e].x + enemies[e].width &&
-                        bullets[b].x + bullets[b].width > enemies[e].x &&
-                        bullets[b].y < enemies[e].y + enemies[e].height &&
-                        bullets[b].y + bullets[b].height > enemies[e].y) {
-                        enemies[e].alive = false;
-                        bullets[b].active = false;
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    // Игрок неуязвим - проверку попадания в игрока НЕ делаем
 }
