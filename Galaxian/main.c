@@ -112,6 +112,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             SDL_RenderClear(renderer);
             draw_stars();
 
+            batch_begin();
             for (int i = 0; i < MAX_BULLETS; i++) {
                 draw_bullet(&bullets[i]);
             }
@@ -119,6 +120,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
                 draw_enemy(&enemies[i]);
             }
             draw_player();
+            batch_flush();
 
             // ��������� ������
             draw_text("AI VS AI MODE", SCREEN_WIDTH / 2 - 70, 20, COLOR_YELLOW);

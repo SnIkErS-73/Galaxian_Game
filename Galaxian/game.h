@@ -6,7 +6,15 @@
 #define SCREEN_WIDTH  1024   
 #define SCREEN_HEIGHT 768    
 #define PLAYER_Y      (SCREEN_HEIGHT - 60)
-#define MAX_BULLETS   64
+#define MAX_BULLETS   512
+
+/* Размер горизонтальной полосы для broad-phase (в пикселях).
+ * Враги раскладываются в полосы по вертикали, и каждая пуля
+ * проверяет только врагов из соседних полос, а не всех подряд. */
+#define BAND_H       64
+#define NUM_BANDS    ((SCREEN_HEIGHT + BAND_H - 1) / BAND_H)
+
+
 #define MAX_ENEMIES   256
 #define PLAYER_SPEED  8
 #define BULLET_SPEED  10

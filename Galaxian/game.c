@@ -16,6 +16,9 @@
 /* Разбивка времени отрисовки по фазам - для поиска настоящего узкого места */
 static double t_clear = 0, t_stars = 0, t_fill = 0, t_present = 0;
 
+static double t_coll = 0;
+static double t_coll_old = 0;
+static double t_coll_new = 0;
 
 /* 0 - новая отрисовка (батчинг), 1 - старая (как в исходной курсовой).
  * Нужна, чтобы в одном прогоне сравнить оба варианта на одних данных. */
@@ -104,13 +107,79 @@ void handle_input() {
     }
 }
 
+
+
+/* =====================================================================
+ * BROAD-PHASE: горизонтальные полосы
+ *
+ * band_start[b] - начало полосы b в массиве band_list
+ * band_start[b+1] - конец полосы b
+ * band_list      - индексы врагов, сгруппированных по полосам
+ * ===================================================================== */
+static int band_start[NUM_BANDS + 1];
+static int band_list[MAX_ENEMIES];
+
+/* Строит распределение живых врагов по горизонтальным полосам.
+ * Вызывается один раз на кадр перед проверкой столкновений. */
+static void build_bands(void) {
+    int count[NUM_BANDS];
+    memset(count, 0, sizeof(count));
+
+    /* Шаг 1: считаем, сколько врагов в каждой полосе */
+    for (int e = 0; e < MAX_ENEMIES; e++) {
+        if (!enemies[e].alive) continue;
+        int band = enemies[e].y / BAND_H;
+        if (band < 0) band = 0;
+        if (band >= NUM_BANDS) band = NUM_BANDS - 1;
+        count[band]++;
+    }
+
+    /* Шаг 2: вычисляем начало каждой полосы в band_list */
+    int acc = 0;
+    for (int b = 0; b < NUM_BANDS; b++) {
+        band_start[b] = acc;
+        acc += count[b];
+    }
+    band_start[NUM_BANDS] = acc;
+
+    /* Шаг 3: раскладываем врагов по полосам */
+    memset(count, 0, sizeof(count));
+    for (int e = 0; e < MAX_ENEMIES; e++) {
+        if (!enemies[e].alive) continue;
+        int band = enemies[e].y / BAND_H;
+        if (band < 0) band = 0;
+        if (band >= NUM_BANDS) band = NUM_BANDS - 1;
+        band_list[band_start[band] + count[band]++] = e;
+    }
+}
+
+
+
 // Проверка столкновений
 void check_collisions() {
+    /* Строим распределение врагов по полосам один раз на кадр */
+    build_bands();
+
     // Снаряды игрока vs враги
     for (int b = 0; b < MAX_BULLETS; b++) {
         if (bullets[b].active && !bullets[b].is_enemy) {
-            for (int e = 0; e < MAX_ENEMIES; e++) {
-                if (enemies[e].alive) {
+
+            /* Полоса, в которой находится пуля. */
+            int band = bullets[b].y / BAND_H;
+            if (band < 0) band = 0;
+            if (band >= NUM_BANDS) band = NUM_BANDS - 1;
+
+            /* Проверяем ТОЛЬКО соседние полосы (band-1, band, band+1).*/
+            for (int bb = band - 1; bb <= band + 1; bb++) {
+                if (bb < 0 || bb >= NUM_BANDS) continue;
+
+                int from = band_start[bb];
+                int to = band_start[bb + 1];
+
+                for (int k = from; k < to; k++) {
+                    int e = band_list[k];
+                    if (!enemies[e].alive) continue;
+
                     if (bullets[b].x < enemies[e].x + enemies[e].width &&
                         bullets[b].x + bullets[b].width > enemies[e].x &&
                         bullets[b].y < enemies[e].y + enemies[e].height &&
@@ -124,6 +193,7 @@ void check_collisions() {
             }
         }
     }
+
     // Снаряды врагов vs игрок
     for (int b = 0; b < MAX_BULLETS; b++) {
         if (bullets[b].active && bullets[b].is_enemy) {
@@ -259,7 +329,7 @@ static void draw_game_frame(void) {
  * два разных узких места.
  * ===================================================================== */
 
-#define BENCH_TARGET_BULLETS 32
+#define BENCH_TARGET_BULLETS 256
 
 
 
@@ -300,7 +370,7 @@ static void bench_setup(void) {
 static void bench_run_frames(int frames, double* update_ms,
     double* fill_ms, double* present_ms) {
     double upd = 0.0;
-    t_clear = t_stars = t_fill = t_present = 0;
+    t_clear = t_stars = t_fill = t_present = t_coll = 0;
 
     for (int f = 0; f < frames; f++) {
         /* ---------------- ОБНОВЛЕНИЕ ---------------- */
@@ -308,7 +378,12 @@ static void bench_run_frames(int frames, double* update_ms,
 
         update_bullets();
         update_enemies();
+
+        /* Замеряем столкновения ОТДЕЛЬНО от движения */
+        double c0 = bench_us();
         check_collisions();
+        double c1 = bench_us();
+        t_coll += (c1 - c0);
 
         /* Сбрасываем игровые флаги, чтобы сценарий не прерывался */
         game_over = false;
@@ -363,15 +438,15 @@ void run_benchmark(int frames) {
     double old_upd, old_fill, old_present;
     double new_upd, new_fill, new_present;
 
-    /* ---- ПРОГОН 1: старая отрисовка (точка отсчёта) ---- */
-    bench_setup();
+    /* ---- ПРОГОН 1: старая отрисовка ---- */
     bench_old_draw = 1;
     bench_run_frames(frames, &old_upd, &old_fill, &old_present);
+    t_coll_old = t_coll;
 
     /* ---- ПРОГОН 2: новая отрисовка (батчинг) ---- */
-    bench_setup();
     bench_old_draw = 0;
     bench_run_frames(frames, &new_upd, &new_fill, &new_present);
+    t_coll_new = t_coll;
 
     bench_old_draw = 0;
     selected_difficulty = saved_difficulty;
@@ -380,10 +455,10 @@ void run_benchmark(int frames) {
     if (f) {
         fprintf(f, "enemies=%d bullets=%d frames=%d\n",
             bench_spawned, BENCH_TARGET_BULLETS, frames);
-        fprintf(f, "  OLD draw: update=%.4f fill=%.4f work=%.4f present=%.4f ms\n",
-            old_upd, old_fill, old_upd + old_fill, old_present);
-        fprintf(f, "  NEW draw: update=%.4f fill=%.4f work=%.4f present=%.4f ms  fill_speedup=%.2fx\n",
-            new_upd, new_fill, new_upd + new_fill, new_present,
+        fprintf(f, "  OLD draw: update=%.4f coll=%.4f fill=%.4f work=%.4f present=%.4f ms\n",
+            old_upd, t_coll_old, old_fill, old_upd + old_fill, old_present);
+        fprintf(f, "  NEW draw: update=%.4f coll=%.4f fill=%.4f work=%.4f present=%.4f ms  fill_speedup=%.2fx\n",
+            new_upd, t_coll_new, new_fill, new_upd + new_fill, new_present,
             (new_fill > 0.0) ? (old_fill / new_fill) : 0.0);
         fclose(f);
     }
@@ -587,6 +662,7 @@ void game_loop() {
     }
 }
 void check_collisions_ai(void) {
+    build_bands();
     // Только пули игрока уничтожают врагов (без начисления очков)
     for (int b = 0; b < MAX_BULLETS; b++) {
         if (bullets[b].active && !bullets[b].is_enemy) {
