@@ -16,7 +16,7 @@ Release/
 
 # Сборка через Makefile
 *.o
-galaxian
+Galaxian/galaxian
 benchmark
 
 # Сырые логи замеров

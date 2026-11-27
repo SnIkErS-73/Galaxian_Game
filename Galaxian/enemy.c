@@ -5,7 +5,7 @@
 #include "difficulty.h"
 #include <stdlib.h>
 
-Enemy enemies[MAX_ENEMIES];
+__declspec(align(64)) Enemy enemies[MAX_ENEMIES];
 
 void init_enemies(void) {
     int count = 0;
