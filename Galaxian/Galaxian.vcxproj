@@ -168,6 +168,7 @@
     <ClCompile Include="name_input.c" />
     <ClCompile Include="player.c" />
     <ClCompile Include="render.c" />
+    <ClCompile Include="simd.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ai_player.h" />
@@ -179,6 +180,7 @@
     <ClInclude Include="name_input.h" />
     <ClInclude Include="player.h" />
     <ClInclude Include="render.h" />
+    <ClInclude Include="simd.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Makefile" />

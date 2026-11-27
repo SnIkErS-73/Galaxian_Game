@@ -45,6 +45,9 @@
     <ClCompile Include="ai_player.c">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
+    <ClCompile Include="simd.c">
+      <Filter>Исходные файлы</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="bullet.h">
@@ -72,6 +75,9 @@
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
     <ClInclude Include="ai_player.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="simd.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
   </ItemGroup>

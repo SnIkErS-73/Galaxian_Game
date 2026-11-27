@@ -5,10 +5,10 @@
 #include "game.h"
 
 typedef struct {
-    int x, y;
-    int width, height;
-    bool active;
-    bool is_enemy;
+    int x, y;               /* горячие: движение и проверка столкновений */
+    bool active;            /* горячие */
+    bool is_enemy;          /* горячие: ветвление в check_collisions */
+    int width, height;      /* горячие */
 } Bullet;
 
 extern Bullet bullets[MAX_BULLETS];

@@ -1,8 +1,9 @@
 #include "bullet.h"
 #include "render.h"
 #include "game.h"
+#include "simd.h"
 
-Bullet bullets[MAX_BULLETS];
+__declspec(align(64)) Bullet bullets[MAX_BULLETS];
 
 void init_bullets(void) {
     for (int i = 0; i < MAX_BULLETS; i++) {
@@ -10,23 +11,9 @@ void init_bullets(void) {
     }
 }
 
+/* Логика движения вынесена в simd.c; версия выбирается флагом g_use_simd. */
 void update_bullets(void) {
-    for (int i = 0; i < MAX_BULLETS; i++) {
-        if (bullets[i].active) {
-            if (bullets[i].is_enemy) {
-                bullets[i].y += BULLET_SPEED;
-                if (bullets[i].y > SCREEN_HEIGHT) {
-                    bullets[i].active = false;
-                }
-            }
-            else {
-                bullets[i].y -= BULLET_SPEED;
-                if (bullets[i].y < 0) {
-                    bullets[i].active = false;
-                }
-            }
-        }
-    }
+    simd_update_bullets();
 }
 
 void draw_bullet(Bullet* b) {
